@@ -1,7 +1,15 @@
 import { mainnet } from 'viem/chains'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mock } from 'wagmi/connectors'
-import { ConnectionController, CoreHelperUtil, ModalController, RouterController } from '@reown/appkit-controllers'
+import {
+  ApiController,
+  ConnectionController,
+  CoreHelperUtil,
+  EventsController,
+  ModalController,
+  OptionsController,
+  RouterController,
+} from '@reown/appkit-controllers'
 import { connect, createConfig, createConnector, createStorage, disconnect, http, noopStorage } from '@wagmi/core'
 import { connectOathWallet, getWalletChoices, OATH_WALLET, presentOathWallet } from './oathWallet'
 
@@ -96,6 +104,39 @@ describe('Oath Wallet choice', () => {
     RouterController.reset('ConnectingWalletConnectBasic')
     await tick()
     expect(RouterController.state.view).toBe('ConnectingWalletConnectBasic')
+  })
+
+  it.each([false, true])('retains Oath when the real modal reopens (mobile=%s)', async mobile => {
+    const manualControl = OptionsController.state.manualWCControl
+    const prefetch = vi.spyOn(ApiController, 'prefetch').mockResolvedValue([])
+    const platform = vi.spyOn(CoreHelperUtil, 'isMobile').mockReturnValue(mobile)
+    const events = vi.spyOn(EventsController, 'sendEvent').mockImplementation(() => undefined)
+    OptionsController.setManualWCControl(true)
+    const dispose = presentOathWallet(controllers)
+    try {
+      await ModalController.open()
+      await tick()
+      expect(RouterController.state.view).toBe('ConnectingWalletConnect')
+      expect(RouterController.state.data?.wallet?.id).toBe(OATH_WALLET.id)
+      await ModalController.open()
+      await tick()
+      expect(RouterController.state.view).toBe('ConnectingWalletConnect')
+      expect(RouterController.state.data?.wallet?.id).toBe(OATH_WALLET.id)
+
+      ModalController.close()
+      dispose()
+      await ModalController.open()
+      await tick()
+      expect(RouterController.state.view).toBe(mobile ? 'AllWallets' : 'ConnectingWalletConnectBasic')
+      expect(RouterController.state.data).toBeUndefined()
+    } finally {
+      ModalController.close()
+      dispose()
+      OptionsController.setManualWCControl(manualControl)
+      prefetch.mockRestore()
+      platform.mockRestore()
+      events.mockRestore()
+    }
   })
 
   it('encodes the complete pairing URI in the native iOS link', () => {
